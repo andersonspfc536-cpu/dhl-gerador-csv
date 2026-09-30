@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gerador de CSV – eSecure DHL</title>
+<style>
+  :root { --ink:#1a1a1a; --mute:#5c5c5c; --line:#d9d9d9; --bg:#fff; --panel:#f6f6f4; --yellow:#ffcc00; --red:#d40511; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 "Segoe UI", system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  header { border-top:6px solid var(--yellow); border-bottom:1px solid var(--line); padding:18px 24px; }
+  h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; color:var(--mute); }
+  main { max-width:1100px; margin:0 auto; padding:24px; }
+  label.big { display:block; font-weight:600; margin-bottom:6px; }
+  textarea { width:100%; height:200px; padding:10px; border:1px solid var(--line); border-radius:6px; font:14px/1.4 Consolas, monospace; background:var(--panel); resize:vertical; }
+  textarea:focus, input:focus, button:focus-visible { outline:2px solid var(--ink); outline-offset:1px; }
+  .empty { color:var(--mute); margin:20px 0; }
+  .wrap { overflow-x:auto; border:1px solid var(--line); border-radius:6px; margin-top:16px; }
+  table { border-collapse:collapse; width:max-content; min-width:100%; }
+  th, td { border-bottom:1px solid var(--line); padding:4px; text-align:left; vertical-align:bottom; }
+  th { font-size:12px; font-weight:600; background:var(--panel); padding:6px; max-width:140px; }
+  td input { width:150px; padding:6px; border:1px solid transparent; border-radius:4px; font:inherit; background:transparent; }
+  td input:hover { border-color:var(--line); }
+  td input.warn { border-color:var(--red); background:#fff3f3; }
+  .bar { display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  button { font:inherit; font-weight:600; padding:10px 18px; border-radius:6px; border:1px solid var(--ink); background:#fff; cursor:pointer; }
+  button.main { background:var(--yellow); border-color:var(--yellow); }
+  .alerts { margin-top:14px; }
+  .alerts p { margin:6px 0; padding:8px 12px; border-left:4px solid var(--red); background:#fff3f3; }
+  .ok { color:var(--mute); margin-left:6px; align-self:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gerador de CSV – cadastro de administrador eSecure</h1>
+  <p>Cole o texto do chamado e baixe o CSV no formato do portal. Tudo roda no seu computador; nada é enviado para fora.</p>
+</header>
+<main>
+  <label class="big" for="ticket">Texto do chamado</label>
+  <textarea id="ticket" placeholder="Cole aqui o chamado completo. Se houver vários administradores, cole todos em sequência."></textarea>
+
+  <div id="out"><p class="empty">Cole o chamado acima para ver os dados que serão enviados.</p></div>
+</main>
+
+<script>
+const H = ["AccountNumber(This is the Alphanumeric account number of the Account Admin)","First Name","Last Name","Email Id","Language Code","Office Country Code","Office Number","Office Extension","Mobile Country Code","Mobile Number","Default Security Status","Email Id Consent","Time Bound Authorization Enabled","Default Expiry Duration (Days)"];
+const MOBILE_COL = 9;
+let records = [];
+
+const get = (t, re) => { const m = t.match(re); return m ? m[1].trim() : ""; };
+
+function parse(text) {
+  const blocks = text.split(/(?=N[úu]mero de conta do cliente\s*:)/i).filter(b => /N[úu]mero de conta do cliente\s*:/i.test(b));
+  return blocks.map(b => {
+    let phone = get(b, /Telefone do Administrador\s*[–—-]\s*Cliente\s*:\s*(.*)/i).replace(/\D/g, "");
+    if (phone.startsWith("55") && phone.length >= 12) phone = phone.slice(2);
+    const idioma = get(b, /Idioma das notifica[çc][õo]es\s*:\s*(.*)/i);
+    const lang = /portugu/i.test(idioma) ? "pt" : /ingl/i.test(idioma) ? "en" : /espanh/i.test(idioma) ? "es" : "";
+    const consent = get(b, /Deseja receber e-?mail do eSecure\s*:\s*(.*)/i);
+    const row = new Array(H.length).fill("");
+    row[0]  = get(b, /N[úu]mero de conta do cliente\s*:\s*(\S+)/i);
+    row[1]  = get(b, /Nome do Administrador\s*[–—-]\s*Cliente\s*:\s*(.*)/i);
+    row[2]  = get(b, /Sobrenome do Administrador\s*[–—-]\s*Cliente\s*:\s*(.*)/i);
+    row[3]  = get(b, /E-?mail do Administrador\s*[–—-]\s*Cliente\s*:\s*(\S+)/i);
+    row[4]  = lang;
+    row[8]  = phone ? "BR" : "";
+    row[9]  = phone;
+    row[10] = "Enabled";
+    row[11] = /^s/i.test(consent) ? "Yes" : /^n/i.test(consent) ? "No" : "";
+    return row;
+  });
+}
+
+const q = v => /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+const toCSV = () => [H, ...records].map(r => r.map(q).join(",")).join("\r\n") + "\r\n";
+
+function check(row) {
+  const msgs = [];
+  const who = (row[1] + " " + row[2]).trim() || "Registro";
+  if (!row[0]) msgs.push(who + ": conta não encontrada.");
+  if (!row[3]) msgs.push(who + ": e-mail não encontrado.");
+  if (!row[4]) msgs.push(who + ": idioma não reconhecido; preencha Language Code.");
+  if (row[9] && !/^\d{2}9\d{8}$/.test(row[9]))
+    msgs.push(who + ": o celular " + row[9] + " não tem o formato DDD + 9 + 8 dígitos e o portal pode recusar como \"Mobile number invalid\". Confirme com o solicitante.");
+  return msgs;
+}
+
+function render() {
+  const out = document.getElementById("out");
+  if (!records.length) {
+    out.innerHTML = '<p class="empty">Não encontrei nenhum cadastro. O chamado precisa ter a linha "Número de conta do cliente: ...".</p>';
+    return;
+  }
+  const alerts = records.flatMap(check);
+  let html = '<div class="alerts">' + alerts.map(a => "<p>" + a.replace(/</g, "&lt;") + "</p>").join("") + "</div>";
+  html += '<div class="wrap"><table><thead><tr>' + H.map(h => "<th>" + h.replace(/\(.*\)/, "") + "</th>").join("") + "</tr></thead><tbody>";
+  records.forEach((r, i) => {
+    html += "<tr>" + r.map((v, j) => {
+      const w = j === MOBILE_COL && v && !/^\d{2}9\d{8}$/.test(v) ? " warn" : "";
+      return '<td><input class="' + w.trim() + '" data-i="' + i + '" data-j="' + j + '" value="' + v.replace(/"/g, "&quot;") + '"></td>';
+    }).join("") + "</tr>";
+  });
+  html += '</tbody></table></div><div class="bar"><button class="main" id="dl">Baixar CSV</button><button id="cp">Copiar CSV</button><span class="ok" id="msg"></span></div>';
+  out.innerHTML = html;
+  out.querySelectorAll("input").forEach(el => el.addEventListener("input", e => {
+    records[+e.target.dataset.i][+e.target.dataset.j] = e.target.value;
+  }));
+  document.getElementById("dl").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([toCSV()], { type: "text/csv;charset=utf-8" }));
+    a.download = "DHL_upload.csv";
+    a.click();
+    document.getElementById("msg").textContent = "Arquivo DHL_upload.csv baixado.";
+  };
+  document.getElementById("cp").onclick = async () => {
+    try { await navigator.clipboard.writeText(toCSV()); document.getElementById("msg").textContent = "CSV copiado."; }
+    catch (e) { document.getElementById("msg").textContent = "Não foi possível copiar; use Baixar CSV."; }
+  };
+}
+
+document.getElementById("ticket").addEventListener("input", e => {
+  if (!e.target.value.trim()) { records = []; document.getElementById("out").innerHTML = '<p class="empty">Cole o chamado acima para ver os dados que serão enviados.</p>'; return; }
+  records = parse(e.target.value);
+  render();
+});
+</script>
+</body>
+</html>
